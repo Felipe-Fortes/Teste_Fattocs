@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lista de Tarefas</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: sans-serif; max-width: 900px; margin: 20px auto; padding: 0 16px; }
+    h1 { font-size: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+    th { background: #eee; }
+    tr.alta { background: #fffbcc; }
+    .acoes { white-space: nowrap; }
+    .acoes button { margin-right: 4px; cursor: pointer; }
+    .rodape { margin-top: 16px; font-weight: bold; }
+    .btn-incluir { padding: 8px 16px; cursor: pointer; margin-top: 8px; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10; }
+    .modal { background: #fff; padding: 24px; border-radius: 8px; min-width: 320px; }
+    .modal h2 { margin-top: 0; font-size: 1.2rem; }
+    .modal label { display: block; margin-top: 12px; }
+    .modal input { width: 100%; padding: 6px 8px; }
+    .modal .botoes { margin-top: 20px; display: flex; gap: 8px; }
+    .modal .botoes button { padding: 8px 16px; cursor: pointer; }
+    .confirmacao { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 20; }
+    .confirmacao .caixa { background: #fff; padding: 24px; border-radius: 8px; }
+    .confirmacao .botoes { margin-top: 16px; display: flex; gap: 8px; }
+    .erro { color: #c00; font-size: 0.9rem; margin-top: 4px; }
+    .oculto { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Lista de Tarefas</h1>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Identificador</th>
+        <th>Nome da tarefa</th>
+        <th>Custo (R$)</th>
+        <th>Data-limite</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody id="corpo"></tbody>
+  </table>
+
+  <div class="rodape" id="rodape">Somatório dos custos: R$ 0,00</div>
+  <button type="button" class="btn-incluir" id="btnIncluir">Incluir</button>
+
+  <!-- Modal Incluir -->
+  <div id="modalIncluir" class="overlay oculto">
+    <div class="modal">
+      <h2>Incluir tarefa</h2>
+      <label>Nome da tarefa <input type="text" id="incluirNome" required></label>
+      <span id="incluirNomeErro" class="erro oculto"></span>
+      <label>Custo (R$) <input type="text" id="incluirCusto" placeholder="0,00" required></label>
+      <span id="incluirCustoErro" class="erro oculto"></span>
+      <label>Data-limite (DD/MM/AAAA) <input type="text" id="incluirData" placeholder="DD/MM/AAAA" required></label>
+      <span id="incluirDataErro" class="erro oculto"></span>
+      <div class="botoes">
+        <button type="button" id="incluirSalvar">Salvar</button>
+        <button type="button" id="incluirCancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Editar -->
+  <div id="modalEditar" class="overlay oculto">
+    <div class="modal">
+      <h2>Editar tarefa</h2>
+      <input type="hidden" id="editarId">
+      <label>Nome da tarefa <input type="text" id="editarNome" required></label>
+      <span id="editarNomeErro" class="erro oculto"></span>
+      <label>Custo (R$) <input type="text" id="editarCusto" required></label>
+      <span id="editarCustoErro" class="erro oculto"></span>
+      <label>Data-limite (DD/MM/AAAA) <input type="text" id="editarData" required></label>
+      <span id="editarDataErro" class="erro oculto"></span>
+      <div class="botoes">
+        <button type="button" id="editarSalvar">Salvar</button>
+        <button type="button" id="editarCancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirmação Excluir -->
+  <div id="confirmacao" class="confirmacao oculto">
+    <div class="caixa">
+      <p>Deseja realmente excluir esta tarefa?</p>
+      <div class="botoes">
+        <button type="button" id="confirmarSim">Sim</button>
+        <button type="button" id="confirmarNao">Não</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.location.origin + '/api';
+
+    function formatarMoeda(valor) {
+      const n = Number(valor);
+      if (isNaN(n)) return '0,00';
+      return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatarData(str) {
+      if (!str) return '';
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+        const [a, m, d] = str.split('T')[0].split('-');
+        return d + '/' + m + '/' + a;
+      }
+      return str;
+    }
+
+    function parseDecimalBr(str) {
+      const s = String(str || '').trim().replace(/\./g, '').replace(',', '.');
+      const n = parseFloat(s);
+      return isNaN(n) ? NaN : n;
+    }
+
+    function validarDataBr(str) {
+      const m = String(str || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (!m) return false;
+      const d = parseInt(m[1], 10);
+      const mes = parseInt(m[2], 10) - 1;
+      const a = parseInt(m[3], 10);
+      const date = new Date(a, mes, d);
+      return date.getDate() === d && date.getMonth() === mes && date.getFullYear() === a;
+    }
+
+    let tarefas = [];
+    let idParaExcluir = null;
+
+    function render() {
+      const tbody = document.getElementById('corpo');
+      tbody.innerHTML = '';
+      let total = 0;
+      tarefas.forEach((t, idx) => {
+        total += Number(t.custo);
+        const tr = document.createElement('tr');
+        if (Number(t.custo) >= 1000) tr.classList.add('alta');
+        tr.innerHTML =
+          '<td>' + t.id + '</td>' +
+          '<td>' + escapeHtml(t.nome) + '</td>' +
+          '<td>R$ ' + formatarMoeda(t.custo) + '</td>' +
+          '<td>' + formatarData(t.data_limite) + '</td>' +
+          '<td class="acoes">' +
+            (idx > 0 ? '<button type="button" data-acao="subir" data-id="' + t.id + '">Subir</button>' : '') +
+            (idx < tarefas.length - 1 ? '<button type="button" data-acao="descer" data-id="' + t.id + '">Descer</button>' : '') +
+            ' <button type="button" data-acao="editar" data-id="' + t.id + '">Editar</button>' +
+            ' <button type="button" data-acao="excluir" data-id="' + t.id + '">Excluir</button>' +
+          '</td>';
+        tbody.appendChild(tr);
+      });
+      document.getElementById('rodape').textContent = 'Somatório dos custos: R$ ' + formatarMoeda(total);
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    async function carregar() {
+      try {
+        const r = await fetch(API + '/tarefas');
+        if (!r.ok) throw new Error('Falha ao carregar');
+        tarefas = await r.json();
+        render();
+      } catch (e) {
+        alert('Erro ao carregar tarefas: ' + e.message);
+      }
+    }
+
+    const tbody = document.getElementById('corpo');
+    tbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button[data-acao]');
+      if (!btn) return;
+      const acao = btn.getAttribute('data-acao');
+      const id = btn.getAttribute('data-id');
+      if (acao === 'subir' || acao === 'descer') {
+        try {
+          const r = await fetch(API + '/tarefas/' + id + '/reordenar', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ direcao: acao })
+          });
+          if (!r.ok) throw new Error('Falha ao reordenar');
+          tarefas = await r.json();
+          render();
+        } catch (e) {
+          alert('Erro: ' + e.message);
+        }
+        return;
+      }
+      if (acao === 'editar') {
+        const t = tarefas.find(x => x.id == id);
+        if (!t) return;
+        document.getElementById('editarId').value = t.id;
+        document.getElementById('editarNome').value = t.nome;
+        document.getElementById('editarCusto').value = formatarMoeda(t.custo);
+        document.getElementById('editarData').value = formatarData(t.data_limite);
+        document.getElementById('editarNomeErro').classList.add('oculto');
+        document.getElementById('editarCustoErro').classList.add('oculto');
+        document.getElementById('editarDataErro').classList.add('oculto');
+        document.getElementById('modalEditar').classList.remove('oculto');
+        return;
+      }
+      if (acao === 'excluir') {
+        idParaExcluir = id;
+        document.getElementById('confirmacao').classList.remove('oculto');
+      }
+    });
+
+    document.getElementById('btnIncluir').addEventListener('click', () => {
+      document.getElementById('incluirNome').value = '';
+      document.getElementById('incluirCusto').value = '';
+      document.getElementById('incluirData').value = '';
+      document.getElementById('incluirNomeErro').classList.add('oculto');
+      document.getElementById('incluirCustoErro').classList.add('oculto');
+      document.getElementById('incluirDataErro').classList.add('oculto');
+      document.getElementById('modalIncluir').classList.remove('oculto');
+    });
+
+    document.getElementById('incluirCancelar').addEventListener('click', () => {
+      document.getElementById('modalIncluir').classList.add('oculto');
+    });
+
+    document.getElementById('incluirSalvar').addEventListener('click', async () => {
+      const nome = document.getElementById('incluirNome').value.trim();
+      const custoStr = document.getElementById('incluirCusto').value;
+      const dataStr = document.getElementById('incluirData').value.trim();
+      let ok = true;
+      if (!nome) {
+        document.getElementById('incluirNomeErro').textContent = 'Nome é obrigatório.';
+        document.getElementById('incluirNomeErro').classList.remove('oculto');
+        ok = false;
+      } else {
+        document.getElementById('incluirNomeErro').classList.add('oculto');
+      }
+      const custo = parseDecimalBr(custoStr);
+      if (isNaN(custo) || custo < 0) {
+        document.getElementById('incluirCustoErro').textContent = 'Custo deve ser um valor maior ou igual a zero.';
+        document.getElementById('incluirCustoErro').classList.remove('oculto');
+        ok = false;
+      } else {
+        document.getElementById('incluirCustoErro').classList.add('oculto');
+      }
+      if (!validarDataBr(dataStr)) {
+        document.getElementById('incluirDataErro').textContent = 'Data inválida. Use DD/MM/AAAA.';
+        document.getElementById('incluirDataErro').classList.remove('oculto');
+        ok = false;
+      } else {
+        document.getElementById('incluirDataErro').classList.add('oculto');
+      }
+      if (!ok) return;
+      try {
+        const r = await fetch(API + '/tarefas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nome, custo, data_limite: dataStr })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(data.erro || 'Erro ao incluir.');
+          return;
+        }
+        document.getElementById('modalIncluir').classList.add('oculto');
+        tarefas.push(data);
+        render();
+      } catch (e) {
+        alert('Erro: ' + e.message);
+      }
+    });
+
+    document.getElementById('editarCancelar').addEventListener('click', () => {
+      document.getElementById('modalEditar').classList.add('oculto');
+    });
+
+    document.getElementById('editarSalvar').addEventListener('click', async () => {
+      const id = document.getElementById('editarId').value;
+      const nome = document.getElementById('editarNome').value.trim();
+      const custoStr = document.getElementById('editarCusto').value;
+      const dataStr = document.getElementById('editarData').value.trim();
+      let ok = true;
+      if (!nome) {
+        document.getElementById('editarNomeErro').textContent = 'Nome é obrigatório.';
+        document.getElementById('editarNomeErro').classList.remove('oculto');
+        ok = false;
+      } else {
+        document.getElementById('editarNomeErro').classList.add('oculto');
+      }
+      const custo = parseDecimalBr(custoStr);
+      if (isNaN(custo) || custo < 0) {
+        document.getElementById('editarCustoErro').textContent = 'Custo deve ser um valor maior ou igual a zero.';
+        document.getElementById('editarCustoErro').classList.remove('oculto');
+        ok = false;
+      } else {
+        document.getElementById('editarCustoErro').classList.add('oculto');
+      }
+      if (!validarDataBr(dataStr)) {
+        document.getElementById('editarDataErro').textContent = 'Data inválida. Use DD/MM/AAAA.';
+        document.getElementById('editarDataErro').classList.remove('oculto');
+        ok = false;
+      } else {
+        document.getElementById('editarDataErro').classList.add('oculto');
+      }
+      if (!ok) return;
+      try {
+        const r = await fetch(API + '/tarefas/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nome, custo, data_limite: dataStr })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(data.erro || 'Erro ao editar.');
+          return;
+        }
+        document.getElementById('modalEditar').classList.add('oculto');
+        const idx = tarefas.findIndex(t => t.id == id);
+        if (idx !== -1) tarefas[idx] = data;
+        render();
+      } catch (e) {
+        alert('Erro: ' + e.message);
+      }
+    });
+
+    document.getElementById('confirmarNao').addEventListener('click', () => {
+      idParaExcluir = null;
+      document.getElementById('confirmacao').classList.add('oculto');
+    });
+
+    document.getElementById('confirmarSim').addEventListener('click', async () => {
+      if (!idParaExcluir) {
+        document.getElementById('confirmacao').classList.add('oculto');
+        return;
+      }
+      try {
+        const r = await fetch(API + '/tarefas/' + idParaExcluir, { method: 'DELETE' });
+        if (!r.ok) throw new Error('Falha ao excluir');
+        document.getElementById('confirmacao').classList.add('oculto');
+        const idRemovido = idParaExcluir;
+        idParaExcluir = null;
+        tarefas = tarefas.filter(t => t.id != idRemovido);
+        render();
+      } catch (e) {
+        alert('Erro ao excluir: ' + e.message);
+      }
+    });
+
+    carregar();
+  </script>
+</body>
+</html>

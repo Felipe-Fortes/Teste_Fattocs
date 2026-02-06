@@ -1,0 +1,4 @@
+node_modules/
+tarefas.db
+.env
+*.log
