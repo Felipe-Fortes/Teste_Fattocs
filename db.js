@@ -92,18 +92,49 @@ async function proximaOrdem() {
   return r.next;
 }
 
+async function proximoIdDisponivel() {
+  const { db, driver } = getDb();
+  
+  // Busca todos os IDs existentes ordenados
+  let idsExistentes;
+  if (driver === 'pg') {
+    const r = await db.query('SELECT id FROM "Tarefas" ORDER BY id ASC');
+    idsExistentes = r.rows.map(row => row.id);
+  } else {
+    idsExistentes = db.prepare('SELECT id FROM Tarefas ORDER BY id ASC').all().map(row => row.id);
+  }
+  
+  // Se não há tarefas, retorna 1
+  if (idsExistentes.length === 0) return 1;
+  
+  // Procura o primeiro gap começando de 1
+  let idEsperado = 1;
+  for (const id of idsExistentes) {
+    if (id !== idEsperado) {
+      return idEsperado; // Encontrou um gap
+    }
+    idEsperado++;
+  }
+  
+  // Não há gaps, retorna o próximo após o último
+  return idsExistentes[idsExistentes.length - 1] + 1;
+}
+
 async function incluirTarefa(nome, custo, dataLimite) {
   const ordem = await proximaOrdem();
-  const sql = 'INSERT INTO "Tarefas" (nome, custo, data_limite, ordem) VALUES ($1, $2, $3, $4) RETURNING id, nome, custo, data_limite, ordem';
-  const params = [nome, custo, dataLimite, ordem];
-  const r = await runQueryAsync(sql, params);
-  if (r.rows && r.rows[0]) return r.rows[0];
+  const proximoId = await proximoIdDisponivel();
   const { db, driver } = getDb();
-  if (driver === 'sqlite') {
-    const id = db.prepare('SELECT last_insert_rowid() as id').get().id;
-    return { id, nome, custo, data_limite: dataLimite, ordem };
+  
+  if (driver === 'pg') {
+    const sql = 'INSERT INTO "Tarefas" (id, nome, custo, data_limite, ordem) VALUES ($1, $2, $3, $4, $5) RETURNING id, nome, custo, data_limite, ordem';
+    const r = await db.query(sql, [proximoId, nome, custo, dataLimite, ordem]);
+    return r.rows[0];
+  } else {
+    // SQLite
+    const sql = 'INSERT INTO Tarefas (id, nome, custo, data_limite, ordem) VALUES (?, ?, ?, ?, ?)';
+    db.prepare(sql).run(proximoId, nome, custo, dataLimite, ordem);
+    return { id: proximoId, nome, custo, data_limite: dataLimite, ordem };
   }
-  return null;
 }
 
 async function excluirTarefa(id) {
