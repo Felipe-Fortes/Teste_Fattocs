@@ -144,12 +144,18 @@ async function reordenar(id, direcao) {
   const a = lista[idx];
   const b = lista[outroIdx];
   const { db, driver } = getDb();
+  
+  // Usar valor temp evitando violação de UNIQUE constraint :P
+  const temp = -1;
+  
   if (driver === 'pg') {
-    await db.query('UPDATE "Tarefas" SET ordem = $1 WHERE id = $2', [b.ordem, a.id]);
+    await db.query('UPDATE "Tarefas" SET ordem = $1 WHERE id = $2', [temp, a.id]);
     await db.query('UPDATE "Tarefas" SET ordem = $1 WHERE id = $2', [a.ordem, b.id]);
+    await db.query('UPDATE "Tarefas" SET ordem = $1 WHERE id = $2', [b.ordem, a.id]);
   } else {
-    db.prepare('UPDATE Tarefas SET ordem = ? WHERE id = ?').run(b.ordem, a.id);
+    db.prepare('UPDATE Tarefas SET ordem = ? WHERE id = ?').run(temp, a.id);
     db.prepare('UPDATE Tarefas SET ordem = ? WHERE id = ?').run(a.ordem, b.id);
+    db.prepare('UPDATE Tarefas SET ordem = ? WHERE id = ?').run(b.ordem, a.id);
   }
   return listarTarefas();
 }
