@@ -1,7 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const Decimal = require('decimal.js');
 const db = require('./db');
+
+// Constante para o máximo de dígitos permitido (15 dígitos = mais que isso o java bugga)
+const MAX_CUSTO_DIGITS = 15;
+const MAX_CUSTO_VALUE = new Decimal('999999999999999'); // 15 noves
 
 const app = express();
 app.use(cors());
@@ -27,6 +32,35 @@ function formatDataBr(dateStr) {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
+}
+
+function validarCusto(custoStr) {
+  try {
+    let custoTrimmed = String(custoStr).trim();
+    custoTrimmed = custoTrimmed.replace(/\./g, '');
+    custoTrimmed = custoTrimmed.replace(',', '.'); 
+    
+    const decimal = new Decimal(custoTrimmed);
+    
+    // Validar se é número válido e não negativo
+    if (decimal.isNaN() || decimal.isNegative()) {
+      return { valido: false, erro: 'Custo deve ser um número não-negativo.' };
+    }
+    
+    // Valida se n passa dos limites
+    if (decimal.greaterThan(MAX_CUSTO_VALUE)) {
+      return { 
+        valido: false, 
+        erro: `Custo não pode exceder ${MAX_CUSTO_VALUE.toString()} (máximo ${MAX_CUSTO_DIGITS} dígitos).` 
+      };
+    }
+    
+    // Converter o numero
+    const numeroSeguro = decimal.toNumber();
+    return { valido: true, valor: numeroSeguro, decimal: decimal };
+  } catch (e) {
+    return { valido: false, erro: 'Custo deve ser um número válido.' };
+  }
 }
 
 async function init() {
@@ -58,10 +92,13 @@ app.post('/api/tarefas', async (req, res) => {
     if (!nome || typeof nome !== 'string' || !nome.trim()) {
       return res.status(400).json({ erro: 'Nome da tarefa é obrigatório.' });
     }
-    const custoNum = parseFloat(String(custo).replace(',', '.'));
-    if (isNaN(custoNum) || custoNum < 0) {
-      return res.status(400).json({ erro: 'Custo deve ser um valor maior ou igual a zero.' });
+    
+    const validacaoCusto = validarCusto(custo);
+    if (!validacaoCusto.valido) {
+      return res.status(400).json({ erro: validacaoCusto.erro });
     }
+    const custoNum = validacaoCusto.valor;
+    
     const data = parseDataBr(String(data_limite || '').trim());
     if (!data) {
       return res.status(400).json({ erro: 'Data-limite inválida. Use DD/MM/AAAA.' });
@@ -95,10 +132,13 @@ app.put('/api/tarefas/:id', async (req, res) => {
     if (!nome || typeof nome !== 'string' || !nome.trim()) {
       return res.status(400).json({ erro: 'Nome da tarefa é obrigatório.' });
     }
-    const custoNum = parseFloat(String(custo).replace(',', '.'));
-    if (isNaN(custoNum) || custoNum < 0) {
-      return res.status(400).json({ erro: 'Custo deve ser um valor maior ou igual a zero.' });
+    
+    const validacaoCusto = validarCusto(custo);
+    if (!validacaoCusto.valido) {
+      return res.status(400).json({ erro: validacaoCusto.erro });
     }
+    const custoNum = validacaoCusto.valor;
+    
     const data = parseDataBr(String(data_limite || '').trim());
     if (!data) {
       return res.status(400).json({ erro: 'Data-limite inválida. Use DD/MM/AAAA.' });

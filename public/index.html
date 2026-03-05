@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lista de Tarefas</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/decimal.js/10.4.3/decimal.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body { font-family: sans-serif; max-width: 900px; margin: 20px auto; padding: 0 16px; }
@@ -56,6 +57,7 @@
       <label>Nome da tarefa <input type="text" id="incluirNome" required></label>
       <span id="incluirNomeErro" class="erro oculto"></span>
       <label>Custo (R$) <input type="text" id="incluirCusto" placeholder="0,00" required></label>
+      <small style="color: #666;">Máximo: 999999999999999 (15 dígitos)</small>
       <span id="incluirCustoErro" class="erro oculto"></span>
       <label>Data-limite (DD/MM/AAAA) <input type="text" id="incluirData" placeholder="DD/MM/AAAA" required></label>
       <span id="incluirDataErro" class="erro oculto"></span>
@@ -74,6 +76,7 @@
       <label>Nome da tarefa <input type="text" id="editarNome" required></label>
       <span id="editarNomeErro" class="erro oculto"></span>
       <label>Custo (R$) <input type="text" id="editarCusto" required></label>
+      <small style="color: #666;">Máximo: 999999999999999 (15 dígitos)</small>
       <span id="editarCustoErro" class="erro oculto"></span>
       <label>Data-limite (DD/MM/AAAA) <input type="text" id="editarData" required></label>
       <span id="editarDataErro" class="erro oculto"></span>
@@ -97,6 +100,8 @@
 
   <script>
     const API = window.location.origin + '/api';
+    const MAX_CUSTO_VALUE = '999999999999999'; // 15 dígitos
+    const MAX_CUSTO_DIGITS = 15;
 
     function formatarMoeda(valor) {
       const n = Number(valor);
@@ -115,8 +120,35 @@
 
     function parseDecimalBr(str) {
       const s = String(str || '').trim().replace(/\./g, '').replace(',', '.');
-      const n = parseFloat(s);
-      return isNaN(n) ? NaN : n;
+      try {
+        const decimal = new Decimal(s);
+        return isNaN(decimal.toNumber()) ? NaN : decimal.toNumber();
+      } catch (e) {
+        return NaN;
+      }
+    }
+
+    function validarCusto(custoStr) {
+      try {
+        const s = String(custoStr || '').trim().replace(/\./g, '').replace(',', '.');
+        const decimal = new Decimal(s);
+        
+        if (decimal.isNaN() || decimal.isNegative()) {
+          return { valido: false, erro: 'Custo deve ser um número não-negativo.' };
+        }
+        
+        const maxDecimal = new Decimal(MAX_CUSTO_VALUE);
+        if (decimal.greaterThan(maxDecimal)) {
+          return { 
+            valido: false, 
+            erro: `Custo não pode exceder ${MAX_CUSTO_VALUE} (máximo ${MAX_CUSTO_DIGITS} dígitos).` 
+          };
+        }
+        
+        return { valido: true };
+      } catch (e) {
+        return { valido: false, erro: 'Custo deve ser um número válido.' };
+      }
     }
 
     function validarDataBr(str) {
@@ -239,14 +271,16 @@
       } else {
         document.getElementById('incluirNomeErro').classList.add('oculto');
       }
-      const custo = parseDecimalBr(custoStr);
-      if (isNaN(custo) || custo < 0) {
-        document.getElementById('incluirCustoErro').textContent = 'Custo deve ser um valor maior ou igual a zero.';
+      
+      const validacaoCusto = validarCusto(custoStr);
+      if (!validacaoCusto.valido) {
+        document.getElementById('incluirCustoErro').textContent = validacaoCusto.erro;
         document.getElementById('incluirCustoErro').classList.remove('oculto');
         ok = false;
       } else {
         document.getElementById('incluirCustoErro').classList.add('oculto');
       }
+      
       if (!validarDataBr(dataStr)) {
         document.getElementById('incluirDataErro').textContent = 'Data inválida. Use DD/MM/AAAA.';
         document.getElementById('incluirDataErro').classList.remove('oculto');
@@ -259,7 +293,7 @@
         const r = await fetch(API + '/tarefas', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nome, custo, data_limite: dataStr })
+          body: JSON.stringify({ nome, custo: custoStr, data_limite: dataStr })
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
@@ -291,14 +325,16 @@
       } else {
         document.getElementById('editarNomeErro').classList.add('oculto');
       }
-      const custo = parseDecimalBr(custoStr);
-      if (isNaN(custo) || custo < 0) {
-        document.getElementById('editarCustoErro').textContent = 'Custo deve ser um valor maior ou igual a zero.';
+      
+      const validacaoCusto = validarCusto(custoStr);
+      if (!validacaoCusto.valido) {
+        document.getElementById('editarCustoErro').textContent = validacaoCusto.erro;
         document.getElementById('editarCustoErro').classList.remove('oculto');
         ok = false;
       } else {
         document.getElementById('editarCustoErro').classList.add('oculto');
       }
+      
       if (!validarDataBr(dataStr)) {
         document.getElementById('editarDataErro').textContent = 'Data inválida. Use DD/MM/AAAA.';
         document.getElementById('editarDataErro').classList.remove('oculto');
@@ -311,7 +347,7 @@
         const r = await fetch(API + '/tarefas/' + id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nome, custo, data_limite: dataStr })
+          body: JSON.stringify({ nome, custo: custoStr, data_limite: dataStr })
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
